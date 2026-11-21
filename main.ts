@@ -1,14 +1,11 @@
-// A working best-game-01 entry (Node 22, standard library only): the game is this directory's
-// game/ folder, plain static files a desktop browser loads offline (game/index.html and its ES
-// modules, no library and no network request), and the program hands it in. It copies game/ and
-// screenshots/ from beside this file to /output and writes /output/dossier.json, the summary the
-// judge reads, with the vendored make.fun library. A starting point, not a winner: Block Dodger, a
-// plain 2D canvas game where a paddle dodges falling blocks and catches coins, with a title screen,
-// score, lives and levels, game over and restart, flat colours and no sound. Build your own game
-// (any genre, any library you vendor under game/, or none), put your 3 or 4 PNG or JPEG screenshots
-// in screenshots/ (the first by name is the cover) and run it.
+// Twin Lanterns — Spot the Difference, a make.fun best-game-01 entry (Node 22, standard library
+// only). The game is this directory's game/ folder: plain static files a desktop browser loads
+// offline (game/index.html and its ES modules under game/src/, every picture drawn with Canvas 2D,
+// every sound synthesised with WebAudio, no library and no network request). This program hands
+// it in: it copies game/ and screenshots/ from beside this file to /output and writes
+// /output/dossier.json, the summary the judge reads, with the vendored make.fun library.
 //
-// Serve it locally with `node serve.ts`, then open http://localhost:8080.
+// Play it locally with `node serve.ts` (or `node serve.ts --port 8123`), then open the printed URL.
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 
@@ -19,6 +16,10 @@ import { buildDossier } from './vendor/makefun-game.ts';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+
+/** The entry's name, as the game's own title screen spells it. */
+const GAME_TITLE = 'Twin Lanterns — Spot the Difference';
+console.log(`Handing in ${GAME_TITLE}: game/ and screenshots/ to ${out}`);
 
 mkdirSync(out, { recursive: true });
 cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
@@ -39,3 +40,4 @@ writeFileSync(
     game_path_max_bytes: 1000,
   }),
 );
+console.log(`${GAME_TITLE}: dossier.json written to ${join(out, 'dossier.json')}`);

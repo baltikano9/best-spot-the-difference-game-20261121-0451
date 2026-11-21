@@ -1,5 +1,6 @@
-// A small seeded random number generator (mulberry32): the same seed gives the same game,
-// which is what makes the screenshot scenes repeatable.
+// A small seeded random number generator (mulberry32). The scenes use fixed seeds for their star
+// fields and scattered details, so the left and right pictures (and every screenshot) always match;
+// the run's own seed only decides celebration sparkles and which unfound difference a hint shows.
 
 export function createRandom(seed) {
   let a = seed | 0;

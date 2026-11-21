@@ -1,79 +1,68 @@
-// The screenshot scenes behind ?shot=start|play|end. Each one plays the real rules forward from a
-// fresh world for a fixed number of steps, steered by a simple autopilot (look ahead each way the
-// paddle could move, keep clear of blocks, chase the lowest coin when that is safe), so the frame
-// is what a short game really looks like and the same seed always gives the same frame.
-import { FIELD, PLAYER, STEP } from './config.js';
-import { EVENT_OVER, KIND_BLOCK } from './world.js';
-import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
+// The screenshot scenes behind ?shot=start|play|festival|win. Each one plays the real rules forward
+// from a fresh run: time passes through world.tick and differences are found by world.click at the
+// coordinates in the scene data, exactly as a player's clicks would be, so a frame can never show a
+// state the game itself could not reach. Nothing here reads a clock or Math.random.
+import { RESULT_FOUND, RESULT_MISS } from './world.js';
+import { SCREEN_PLAY, SCREEN_TITLE, SCREEN_WIN } from './render.js';
 
-const START_SECONDS = 5;
-const PLAY_SECONDS = 26;
-const END_LIMIT_SECONDS = 600;
-/**
- * How far ahead, in seconds, the autopilot checks each way it could move: the play scene's pilot
- * looks well ahead and keeps all its lives; the end scene's looks only a moment ahead, so it is
- * caught out once the blocks speed up, as a hurried player is.
- */
-const HORIZON_PLAY = 0.7;
-const HORIZON_END = 0.25;
-const SAMPLE = 1 / 30;
-const DIRECTIONS = [0, -1, 1];
-/** Extra room, each side, it keeps between the paddle and a block. */
-const MARGIN = 10;
-
-/** Seconds until moving in `direction` (-1, 0, 1) runs the paddle into a block; Infinity when it never does. */
-function timeToHit(state, direction, horizon) {
-  const player = state.player;
-  for (let t = SAMPLE; t <= horizon; t += SAMPLE) {
-    const x = Math.min(FIELD.width - player.width, Math.max(0, player.x + direction * PLAYER.speed * t));
-    for (let index = 0; index < state.items.length; index += 1) {
-      const item = state.items[index];
-      if (!item.active || item.kind !== KIND_BLOCK) continue;
-      const y = item.y + item.speed * t;
-      if (y + item.height > player.y && y < player.y + player.height && item.x < x + player.width + MARGIN && item.x + item.width > x - MARGIN) return t;
-    }
-  }
-  return Infinity;
+/** Click the named difference's centre on `side`, insisting that it is found. */
+function find(world, id, side) {
+  const d = world.state.scene.diffs.find((x) => x.id === id);
+  const r = world.click(d.x, d.y, side);
+  if (r.result !== RESULT_FOUND) throw new Error(`shot staging: ${id} was not found (${r.result})`);
+  return r;
 }
 
-/** Of the safe ways to move, the one toward the lowest coin (or the centre); else the one that is hit last. */
-function autopilot(state, horizon) {
-  const player = state.player;
-  let coin = null;
-  for (let index = 0; index < state.items.length; index += 1) {
-    const item = state.items[index];
-    if (item.active && item.kind !== KIND_BLOCK && (coin === null || item.y > coin.y)) coin = item;
-  }
-  const target = coin === null ? FIELD.width / 2 : coin.x + coin.width / 2;
-  const centre = player.x + player.width / 2;
-  const wanted = target > centre + 8 ? 1 : target < centre - 8 ? -1 : 0;
-  let best = wanted;
-  let bestTime = timeToHit(state, wanted, horizon);
-  for (let index = 0; index < DIRECTIONS.length && bestTime !== Infinity; index += 1) {
-    const time = timeToHit(state, DIRECTIONS[index], horizon);
-    if (time > bestTime) {
-      bestTime = time;
-      best = DIRECTIONS[index];
-    }
-  }
-  return best;
+/** Play the current scene to the end, with `gap` seconds between finds. */
+function clearScene(world, gap) {
+  const diffs = world.state.scene.diffs;
+  diffs.forEach((d, i) => {
+    world.tick(gap, true);
+    find(world, d.id, i % 2 ? 'left' : 'right');
+  });
 }
 
 /**
- * Set `world` to the named scene (start, play or end; any other name is start) and return the
- * screen to draw over it and the best score to show.
+ * Stage the named shot on `world` and return what the renderer needs besides the state:
+ * { screen, t, best, newBest }. Unknown names give the title screen.
  */
 export function stageShot(name, world) {
-  world.reset();
-  if (name !== 'play' && name !== 'end') {
-    for (let index = 0; index < START_SECONDS / STEP; index += 1) world.step(STEP, 0, true);
-    return { screen: SCREEN_TITLE, best: 0 };
+  world.startRun();
+  if (name === 'play') {
+    // Scene 1, a minute and a quarter in: three found, one wrong click, four to go.
+    world.tick(21, true);
+    find(world, 'moonFlip', 'left');
+    world.tick(17, true);
+    if (world.click(300, 150, 'right').result !== RESULT_MISS) throw new Error('shot staging: the miss click hit something');
+    world.tick(14, true);
+    find(world, 'catTail', 'right');
+    world.tick(16, true);
+    find(world, 'paperBoat', 'right');
+    world.tick(0.9, true);
+    return { screen: SCREEN_PLAY, t: 2.4, best: 0, newBest: false };
   }
-  const limit = name === 'end' ? END_LIMIT_SECONDS : PLAY_SECONDS;
-  const horizon = name === 'end' ? HORIZON_END : HORIZON_PLAY;
-  for (let index = 0; index < limit / STEP; index += 1) {
-    if (world.step(STEP, autopilot(world.state, horizon), false) & EVENT_OVER) break;
+  if (name === 'festival') {
+    // Scene 1 cleared, then scene 2 under way: two found, a hint pulsing, five to go.
+    clearScene(world, 16);
+    world.nextScene();
+    world.tick(24, true);
+    find(world, 'cometTail', 'right');
+    world.tick(31, true);
+    find(world, 'windowDark', 'left');
+    world.tick(12, true);
+    world.useHint();
+    world.tick(0.5, true);
+    return { screen: SCREEN_PLAY, t: 5.1, best: 0, newBest: false };
   }
-  const over = world.state.lives === 0;
-  return { screen: over ? SCREEN_OVER : SCREEN_PLAY, best: world.state.score };
+  if (name === 'win') {
+    clearScene(world, 15);
+    world.nextScene();
+    clearScene(world, 18);
+    world.nextScene();
+    clearScene(world, 14);
+    world.tick(3, false);
+    return { screen: SCREEN_WIN, t: 3.3, best: world.state.score, newBest: true };
+  }
+  world.tick(1.2, false);
+  return { screen: SCREEN_TITLE, t: 1.2, best: 0, newBest: false };
 }

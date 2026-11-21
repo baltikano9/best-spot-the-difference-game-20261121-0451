@@ -1,124 +1,168 @@
-// The game's rules and state, with no drawing and no browser in it: the player's paddle, the
-// pool of falling blocks and coins, spawning, collisions, score, lives and level. step() advances
-// one fixed step and returns what happened as bit flags, so the caller can react without the
-// world knowing about screens or sound. Nothing here allocates after createWorld returns.
-import { BLOCK, COIN, FIELD, LEVEL, LIVES, PLAYER, POOL_SIZE } from './config.js';
+// The game's state and rules, with no DOM: which scene is up, which differences are found, the
+// score, the clock, hints and mistakes. Clicks arrive in panel coordinates (0..600 x 0..500) and
+// are tested against the very same difference list the scene draws from (scenes.js), so what you
+// see is exactly what you can click. Time only moves through tick(dt); nothing reads a real clock,
+// which keeps the screenshot scenes and the Node test harness deterministic.
+import { DIFFS_PER_SCENE, SCORING, TIMING } from './config.js';
+import { SCENES } from './scenes.js';
 
-export const KIND_BLOCK = 0;
-export const KIND_COIN = 1;
+export const RESULT_FOUND = 'found';
+export const RESULT_MISS = 'miss';
+export const RESULT_IGNORED = 'ignored';
 
-export const EVENT_HIT = 1;
-export const EVENT_COIN = 2;
-export const EVENT_OVER = 4;
+export const EVENT_TIMEUP = 1;
 
-function overlaps(a, b) {
-  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+/**
+ * The difference a click at (x, y) lands on: the nearest one whose circle contains the point, found
+ * or not (so a second click on a found difference is harmless), or null.
+ */
+export function hitTest(sceneDef, x, y) {
+  let best = null;
+  let bestDistance = Infinity;
+  for (const d of sceneDef.diffs) {
+    const distance = Math.hypot(x - d.x, y - d.y);
+    if (distance <= d.r && distance < bestDistance) {
+      best = d;
+      bestDistance = distance;
+    }
+  }
+  return best;
 }
 
 export function createWorld(random) {
-  const player = { x: 0, y: FIELD.groundY - PLAYER.height, width: PLAYER.width, height: PLAYER.height, invulnerable: 0 };
-  const items = [];
-  for (let index = 0; index < POOL_SIZE; index += 1) {
-    items.push({ active: false, kind: KIND_BLOCK, x: 0, y: 0, width: 0, height: 0, speed: 0 });
-  }
-  const state = { player, items, score: 0, lives: LIVES, level: 1, elapsed: 0, blockTimer: 0, coinTimer: 0 };
+  const state = {
+    sceneIndex: 0,
+    scene: SCENES[0],
+    /** Found differences in the order found: { id, at } with `at` on the world clock. */
+    found: [],
+    score: 0,
+    sceneStartScore: 0,
+    timeLeft: TIMING.sceneSeconds,
+    hintsLeft: SCORING.hintsPerScene,
+    mistakes: 0,
+    /** Seconds since the world began; drives ring, shake and hint animations. */
+    clock: 0,
+    lastMiss: null,
+    hint: null,
+    cleared: false,
+    timeUp: false,
+    /** One entry per cleared scene: { name, finds, bonus, secondsLeft, mistakes, hintsUsed }. */
+    results: [],
+  };
 
-  function reset() {
-    player.x = (FIELD.width - player.width) / 2;
-    player.invulnerable = 0;
-    for (const item of items) item.active = false;
-    state.score = 0;
-    state.lives = LIVES;
-    state.level = 1;
-    state.elapsed = 0;
-    state.blockTimer = BLOCK.interval;
-    state.coinTimer = COIN.interval;
-  }
-
-  function freeItem() {
-    for (let index = 0; index < items.length; index += 1) if (!items[index].active) return items[index];
-    return null;
-  }
-
-  function spawnBlock() {
-    const item = freeItem();
-    if (item === null) return;
-    item.active = true;
-    item.kind = KIND_BLOCK;
-    item.width = BLOCK.minWidth + random() * (BLOCK.maxWidth - BLOCK.minWidth);
-    item.height = BLOCK.height;
-    item.x = random() * (FIELD.width - item.width);
-    item.y = -item.height;
-    item.speed = BLOCK.speed + BLOCK.speedPerLevel * (state.level - 1) + random() * BLOCK.speedJitter;
+  function isFound(id) {
+    return state.found.some((f) => f.id === id);
   }
 
-  function spawnCoin() {
-    const item = freeItem();
-    if (item === null) return;
-    item.active = true;
-    item.kind = KIND_COIN;
-    item.width = COIN.size;
-    item.height = COIN.size;
-    item.x = random() * (FIELD.width - item.width);
-    item.y = -item.height;
-    item.speed = COIN.speed + COIN.speedPerLevel * (state.level - 1);
+  function startScene(index) {
+    state.sceneIndex = index;
+    state.scene = SCENES[index];
+    state.found = [];
+    state.sceneStartScore = state.score;
+    state.timeLeft = TIMING.sceneSeconds;
+    state.hintsLeft = SCORING.hintsPerScene;
+    state.mistakes = 0;
+    state.lastMiss = null;
+    state.hint = null;
+    state.cleared = false;
+    state.timeUp = false;
   }
 
-  function blockInterval() {
-    return Math.max(BLOCK.minInterval, BLOCK.interval * BLOCK.intervalScale ** (state.level - 1));
+  function finishScene() {
+    const secondsLeft = Math.floor(state.timeLeft);
+    const bonus = secondsLeft * SCORING.bonusPerSecond;
+    state.score += bonus;
+    state.cleared = true;
+    state.hint = null;
+    state.results.push({
+      name: state.scene.name,
+      finds: DIFFS_PER_SCENE * SCORING.perFind,
+      bonus,
+      secondsLeft,
+      mistakes: state.mistakes,
+      hintsUsed: SCORING.hintsPerScene - state.hintsLeft,
+    });
   }
 
-  /**
-   * One fixed step. `direction` is -1, 0 or 1 (left, still, right). With `harmless` set (the title
-   * screen's backdrop) things fall but nothing touches the player and nothing scores.
-   */
-  function step(dt, direction, harmless) {
-    let events = 0;
-    state.elapsed += dt;
-    state.level = Math.min(LEVEL.max, 1 + Math.floor(state.elapsed / LEVEL.seconds));
+  return {
+    state,
+    isFound,
 
-    player.x = Math.min(FIELD.width - player.width, Math.max(0, player.x + direction * PLAYER.speed * dt));
-    if (player.invulnerable > 0) player.invulnerable = Math.max(0, player.invulnerable - dt);
+    /** A fresh run from the first scene. */
+    startRun() {
+      state.score = 0;
+      state.results = [];
+      startScene(0);
+    },
 
-    state.blockTimer -= dt;
-    if (state.blockTimer <= 0) {
-      spawnBlock();
-      state.blockTimer += blockInterval();
-    }
-    state.coinTimer -= dt;
-    if (state.coinTimer <= 0) {
-      spawnCoin();
-      state.coinTimer += COIN.interval + random() * COIN.intervalJitter;
-    }
+    /** Play the current scene again from its start, with the score it began with. */
+    retryScene() {
+      state.score = state.sceneStartScore;
+      startScene(state.sceneIndex);
+    },
 
-    for (let index = 0; index < items.length; index += 1) {
-      const item = items[index];
-      if (!item.active) continue;
-      item.y += item.speed * dt;
-      if (item.y > FIELD.groundY) {
-        item.active = false;
-        if (item.kind === KIND_BLOCK && !harmless) state.score += BLOCK.dodgePoints;
-        continue;
+    /** Move on to the next scene; false when the cleared scene was the last one. */
+    nextScene() {
+      if (state.sceneIndex + 1 >= SCENES.length) return false;
+      startScene(state.sceneIndex + 1);
+      return true;
+    },
+
+    get isLastScene() {
+      return state.sceneIndex === SCENES.length - 1;
+    },
+
+    /**
+     * A click at panel coordinates (x, y) on `side` ('left' or 'right'). Returns { result, diff,
+     * complete }: found (a new difference; complete when it was the last one), miss (nothing there:
+     * costs time and shakes that panel) or ignored (already found, or the scene is not running).
+     */
+    click(x, y, side) {
+      if (state.cleared || state.timeUp) return { result: RESULT_IGNORED, diff: null, complete: false };
+      const diff = hitTest(state.scene, x, y);
+      if (diff && isFound(diff.id)) return { result: RESULT_IGNORED, diff, complete: false };
+      if (diff) {
+        state.found.push({ id: diff.id, at: state.clock });
+        state.score += SCORING.perFind;
+        if (state.hint && state.hint.id === diff.id) state.hint = null;
+        const complete = state.found.length === state.scene.diffs.length;
+        if (complete) finishScene();
+        return { result: RESULT_FOUND, diff, complete };
       }
-      if (harmless || !overlaps(item, player)) continue;
-      if (item.kind === KIND_COIN) {
-        item.active = false;
-        state.score += COIN.points;
-        events |= EVENT_COIN;
-      } else if (player.invulnerable === 0) {
-        item.active = false;
-        state.lives -= 1;
-        player.invulnerable = PLAYER.invulnerable;
-        events |= EVENT_HIT;
-        if (state.lives === 0) {
-          events |= EVENT_OVER;
-          break;
-        }
-      }
-    }
-    return events;
-  }
+      state.mistakes += 1;
+      state.timeLeft = Math.max(0, state.timeLeft - TIMING.missPenalty);
+      state.lastMiss = { side, x, y, at: state.clock };
+      return { result: RESULT_MISS, diff: null, complete: false };
+    },
 
-  reset();
-  return { state, reset, step };
+    /** Pulse a random unfound difference for a moment; null when no hints are left (or none needed). */
+    useHint() {
+      if (state.cleared || state.timeUp || state.hintsLeft <= 0) return null;
+      if (state.hint && state.clock - state.hint.at < TIMING.hintSeconds) return null;
+      const unfound = state.scene.diffs.filter((d) => !isFound(d.id));
+      if (unfound.length === 0) return null;
+      const diff = unfound[Math.floor(random() * unfound.length)];
+      state.hintsLeft -= 1;
+      state.score = Math.max(0, state.score - SCORING.hintCost);
+      state.hint = { id: diff.id, at: state.clock };
+      return diff;
+    },
+
+    /**
+     * Advance time by dt seconds. The world clock always runs (animations); the scene timer only
+     * while the scene is being played (`running`). Returns EVENT_TIMEUP the moment time runs out.
+     */
+    tick(dt, running) {
+      state.clock += dt;
+      if (state.hint && state.clock - state.hint.at > TIMING.hintSeconds) state.hint = null;
+      if (!running || state.cleared || state.timeUp) return 0;
+      state.timeLeft = Math.max(0, state.timeLeft - dt);
+      if (state.timeLeft === 0) {
+        state.timeUp = true;
+        state.hint = null;
+        return EVENT_TIMEUP;
+      }
+      return 0;
+    },
+  };
 }

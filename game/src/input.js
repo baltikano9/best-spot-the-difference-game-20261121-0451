@@ -1,53 +1,84 @@
-// Keyboard and pointer input. Held keys give a steering direction; one-shot presses (start or
-// restart, pause) are queued as bit flags and taken once by the loop, so a press between two
-// frames is never lost and never counted twice.
+// Pointer and keyboard input. A click is mapped from the window to the 1280x720 logical canvas
+// (undoing the renderer's letterbox scale and offset), then to a picture panel and that panel's own
+// coordinates, so the rules only ever see (side, x, y) in the same space the scenes are drawn in.
+// Key presses become one-shot ACTION_* flags that the loop takes once per frame.
+import { PANEL } from './config.js';
 
 export const ACTION_CONFIRM = 1;
 export const ACTION_PAUSE = 2;
+export const ACTION_HINT = 4;
+export const ACTION_RESTART = 8;
+export const ACTION_MUTE = 16;
 
-const LEFT = new Set(['ArrowLeft', 'KeyA']);
-const RIGHT = new Set(['ArrowRight', 'KeyD']);
-const CONFIRM = new Set(['Space', 'Enter']);
-const PAUSE = new Set(['KeyP', 'Escape']);
+const KEYS = {
+  Space: ACTION_CONFIRM,
+  Enter: ACTION_CONFIRM,
+  KeyP: ACTION_PAUSE,
+  Escape: ACTION_PAUSE,
+  KeyH: ACTION_HINT,
+  KeyR: ACTION_RESTART,
+  KeyM: ACTION_MUTE,
+};
 
-export function createInput(target) {
-  let left = false;
-  let right = false;
+/** The panel under a logical-canvas point, with the point in that panel's coordinates; or null. */
+export function panelAt(x, y) {
+  const py = y - PANEL.y;
+  if (py < 0 || py >= PANEL.height) return null;
+  for (const [side, left] of [['left', PANEL.leftX], ['right', PANEL.rightX]]) {
+    const px = x - left;
+    if (px >= 0 && px < PANEL.width) return { side, x: px, y: py };
+  }
+  return null;
+}
+
+export function inRect(x, y, r) {
+  return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+}
+
+/**
+ * `toLogical(clientX, clientY)` is the renderer's inverse mapping. `onGesture` runs inside every
+ * user gesture (the browser only lets audio start there).
+ */
+export function createInput(canvas, toLogical, onGesture) {
   let actions = 0;
+  const clicks = [];
+  const hover = { x: -1, y: -1 };
 
   window.addEventListener('keydown', (event) => {
-    if (LEFT.has(event.code)) left = true;
-    else if (RIGHT.has(event.code)) right = true;
-    else if (CONFIRM.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_CONFIRM;
-    } else if (PAUSE.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_PAUSE;
-    } else return;
+    const action = KEYS[event.code];
+    if (!action) return;
     event.preventDefault();
+    if (event.repeat) return;
+    onGesture();
+    actions |= action;
   });
-  window.addEventListener('keyup', (event) => {
-    if (LEFT.has(event.code)) left = false;
-    else if (RIGHT.has(event.code)) right = false;
+  canvas.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    onGesture();
+    const p = toLogical(event.clientX, event.clientY);
+    clicks.push({ x: p.x, y: p.y, panel: panelAt(p.x, p.y) });
   });
-  // A key released while the tab is hidden never sends keyup: let go of everything on blur.
-  window.addEventListener('blur', () => {
-    left = false;
-    right = false;
+  canvas.addEventListener('pointermove', (event) => {
+    const p = toLogical(event.clientX, event.clientY);
+    hover.x = p.x;
+    hover.y = p.y;
   });
-  target.addEventListener('pointerdown', () => {
-    actions |= ACTION_CONFIRM;
+  canvas.addEventListener('pointerleave', () => {
+    hover.x = -1;
+    hover.y = -1;
   });
 
   return {
-    /** -1 for left, 1 for right, 0 for neither or both. */
-    direction() {
-      return (right ? 1 : 0) - (left ? 1 : 0);
-    },
-    /** The one-shot presses since the last call, as ACTION_* flags. */
+    hover,
+    /** The key presses since the last call, as ACTION_* flags. */
     takeActions() {
       const taken = actions;
       actions = 0;
       return taken;
+    },
+    /** The clicks since the last call: { x, y, panel } in logical canvas coordinates. */
+    takeClicks() {
+      return clicks.splice(0, clicks.length);
     },
   };
 }

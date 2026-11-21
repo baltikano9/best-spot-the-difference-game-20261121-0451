@@ -1,61 +1,81 @@
-// Every tuning number and colour in one place. The playfield is a fixed 1280x720 logical area;
-// the renderer scales it to the window, so no rule below depends on the screen size.
+// Every tuning number, size and colour in one place. The game is laid out on a fixed 1280x720
+// logical canvas; the renderer scales that to the window, so nothing below depends on the screen.
 
-export const FIELD = { width: 1280, height: 720, groundY: 664 };
+export const VIEW = { width: 1280, height: 720 };
 
-/** The simulation's fixed step, in seconds: 60 updates a second whatever the display's rate. */
-export const STEP = 1 / 60;
+/**
+ * The two picture panels. Scenes are drawn in panel coordinates (0..600 x 0..500); the left panel
+ * sits at x=24 and the right one at x=656, both at y=132, with a 32 px gutter between them.
+ */
+export const PANEL = { width: 600, height: 500, y: 132, leftX: 24, rightX: 656 };
 
-export const PLAYER = {
-  width: 72,
-  height: 24,
-  speed: 560,
-  invulnerable: 1.5,
+export const HEADER = { height: 104, barY: 90, barHeight: 8 };
+
+export const FOOTER = {
+  y: 648,
+  hint: { x: 24, y: 650, w: 236, h: 48 },
+  pause: { x: 272, y: 650, w: 150, h: 48 },
 };
 
-export const LIVES = 3;
+/** The win screen's Play Again button, in canvas coordinates. */
+export const PLAY_AGAIN = { x: 530, y: 526, w: 220, h: 52 };
 
-export const BLOCK = {
-  minWidth: 40,
-  maxWidth: 110,
-  height: 36,
-  speed: 240,
-  speedPerLevel: 30,
-  speedJitter: 90,
-  interval: 0.55,
-  intervalScale: 0.88,
-  minInterval: 0.14,
-  dodgePoints: 1,
+export const TIMING = {
+  sceneSeconds: 180,
+  missPenalty: 5,
+  /** Below these fractions of the scene time the timer bar turns amber, then red. */
+  amberAt: 0.5,
+  redAt: 0.2,
+  /** How long a scene's celebration stays up before the next scene starts on its own. */
+  clearSeconds: 3.6,
+  /** The last scene's celebration before the win screen. */
+  finalClearSeconds: 2.4,
+  hintSeconds: 2.6,
+  shakeSeconds: 0.35,
+  ringGrowSeconds: 0.45,
+  labelSeconds: 1.8,
 };
 
-export const COIN = {
-  size: 24,
-  speed: 190,
-  speedPerLevel: 14,
-  interval: 1.4,
-  intervalJitter: 0.8,
-  points: 10,
+export const SCORING = {
+  perFind: 100,
+  hintCost: 150,
+  hintsPerScene: 3,
+  /** Points for each whole second left on the clock when a scene is cleared. */
+  bonusPerSecond: 5,
 };
 
-/** Seconds of play per level, and the last level: speeds and spawn rates stop growing there. */
-export const LEVEL = { seconds: 12, max: 12 };
-
-/** How many falling things can exist at once; the pool is allocated once, at boot. */
-export const POOL_SIZE = 64;
+export const DIFFS_PER_SCENE = 7;
 
 export const PALETTE = {
-  backdrop: '#11141b',
-  sky: '#1b1f2a',
-  ground: '#2a3040',
-  player: '#4fc3f7',
-  block: '#e5534b',
-  coin: '#f2c94c',
-  panel: '#252b38',
-  text: '#eef1f5',
-  muted: '#8b93a3',
+  backdrop: '#120d1c',
+  headerTop: '#24182f',
+  headerBottom: '#1a1225',
+  ink: '#fff6e6',
+  muted: '#c9b9d6',
+  faint: '#8d7a9e',
+  gold: '#ffc861',
+  goldDeep: '#e8912e',
+  ember: '#ff7a45',
+  ring: '#ffd54f',
+  ringShadow: 'rgba(40, 14, 0, 0.75)',
+  hint: '#7fe3ff',
+  miss: '#ff5a5a',
+  barTrack: 'rgba(255, 255, 255, 0.12)',
+  barOk: '#5fd39a',
+  barAmber: '#ffb238',
+  barRed: '#ff4d4d',
+  card: 'rgba(30, 20, 42, 0.96)',
+  cardEdge: '#ffc861',
+  frame: '#d9a55b',
+  button: '#ff9e45',
+  buttonText: '#2a1306',
 };
 
-export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+export const FONT = 'system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans", sans-serif';
+export const DISPLAY_FONT = 'Georgia, "Palatino Linotype", "Book Antiqua", "Times New Roman", serif';
 
-/** Where the best score is kept between visits (this browser only). */
-export const BEST_KEY = 'block-dodger.best';
+export const TITLE = 'Twin Lanterns';
+export const SUBTITLE = 'Spot the Difference';
+
+/** Where the best total score is kept between visits (this browser only). */
+export const BEST_KEY = 'twin-lanterns.best';
